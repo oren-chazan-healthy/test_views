@@ -1,0 +1,65 @@
+select e.product_group,
+    e.region,
+    e.product_name,
+    e.flow_name,
+    e.scan_id,
+    e.real_scan_ind,
+    e.successful_exam_ind as successful_scan_ind,
+    case 
+        when e.successful_exam_ind = 0 and e.has_exam_ind = 1 and e.scan_in_progress_ind = 1
+            then 0
+        when e.successful_exam_ind = 0 and e.has_exam_ind = 1 
+            then 1
+        when e.failed_before_scan_ind = 1
+            then 1
+        else 0 
+    end as failed_scan_ind,
+    coalesce(e.exam_date, case when e.failed_before_scan_ind = 1 then e.status_updated_at else null end) as scan_date,
+    e.market,
+    CASE WHEN e.partner = 'dip_uti' THEN 'SOUK1130' 
+         WHEN e.partner = 'velieve' THEN 'SOUK1148' 
+    
+    else e.salesorder END as salesorder,
+    e.partner
+from (
+    select 
+        'urine' as product_group,
+        o.region,
+        case when o.product = 'uti' and f.name in ('velieve_online','boots_ireland') then 'velieve' else o.product end as product_name,
+        f.name as flow_name,
+        o.id as scan_id, -- spot: observation, urine: order
+        case when p.is_test then 0 else 1 end as real_scan_ind,
+        case when r.status in ('has_results') and o.status not in ('flow_mismatch') then 1 else 0 end as successful_exam_ind,
+        --case when o.status in ('new', 'client_new_kit', 'client_dry_run', 'eligibility', 'has_results', 'has_diagnosis', 'after_pcp', 'client_pending_pcp') then 0 else 1 end as failed_scan,
+        row_number()over(partition by o.id order by case when r.status in ('has_results') then 1 else 0 end desc, e.client_created_at desc) as exam_priority,
+        e.client_created_at as exam_date,
+        case when e.id is null then 0 else 1 end as has_exam_ind,
+        case when e.id is null and o.status in ('client_report_timeout', 'client_timeout') then 1 else 0 end as failed_before_scan_ind,
+        case when e.id is not null and o.status in ('new','client_dry_run', 'client_exam_created', 'client_new_kit') then 1 else 0 end as scan_in_progress_ind,
+        o.status_updated_at,
+        coalesce(c.market_name, case when o.region = 'uk' then 'UK' when o.region = 'us' then 'US' else null end) as market,
+        o.salesorder,
+        pa.name as partner
+    from base_urine_commercial.orders o
+        left outer join
+        base_urine_commercial.exams e
+            on o.id = e.order_id
+        left outer join 
+        base_urine_commercial.algo_results r
+            on e.id = r.exam_id
+        left outer join
+        base_urine_commercial.flows f
+            on o.flow_id = f.id
+        left outer join
+        base_urine_commercial.patients p
+            on o.patient_id = p.id
+        left outer join
+        base_urine_commercial.partners pa
+            on p.partner_id = pa.id            
+        left outer join
+        `data-warehouse-324712.import_manual.partner_flow_market` c
+            on c.product_group = 'urine'
+            and (o.partner_id = c.partner_id or c.flow_id = o.flow_id)
+    ) e
+   --left join `healthyio-prod.so_mapping_manual.SO_Mapping` som on som.name = e.partner 
+where e.exam_priority = 1
