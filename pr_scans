@@ -27,7 +27,7 @@ from (
         o.region,
         case when o.product = 'uti' and f.name in ('velieve_online','boots_ireland') then 'velieve' else o.product end as product_name,
         f.name as flow_name,
-        o.id as scan_id, -- spot: observation, urine: order
+        o.id as scan_id, 
         case when p.is_test then 0 else 1 end as real_scan_ind,
         case when r.status in ('has_results') and o.status not in ('flow_mismatch') then 1 else 0 end as successful_exam_ind,
         --case when o.status in ('new', 'client_new_kit', 'client_dry_run', 'eligibility', 'has_results', 'has_diagnosis', 'after_pcp', 'client_pending_pcp') then 0 else 1 end as failed_scan,
