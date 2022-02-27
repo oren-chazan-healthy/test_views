@@ -1,0 +1,271 @@
+with PatientsAlgoResults as (
+   SELECT
+       p.id AS patientId,
+       ar.status AS FirstScanStatus,
+       ar.createdAt as FirstScanTime
+   FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Orders` o ON p.id = o.patientId
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Exams` e on o.Id=e.orderId
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.AlgoResults` ar on e.Id=ar.examId
+   left join (
+       SELECT p.id, min(ar.createdAt) as FirstScan
+       FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+           LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Orders` o ON p.id = o.patientId
+           LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Exams` e on o.Id=e.orderId
+           LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.AlgoResults` ar on e.Id=ar.examId
+       WHERE  ar.id is not null AND ar.results is not null
+       group by 1) as far ON p.id = far.id and ar.createdAt=far.FirstScan
+   WHERE  ar.id is not null AND ar.results is not null
+),
+ 
+PatientAnsweredCallsLog AS (
+   SELECT p.uuid AS PatientUUID,
+         date(ch.createdAt) as Cohort,
+         'Answered Call' AS InteractionType,
+         'Call' AS InteractionParentType,
+         pc.createdAt AS InteractionTime,
+         prt.name AS Partner,
+         --date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+         PatientsAlgoResults.FirstScanStatus,
+         PatientsAlgoResults.FirstScanTime,
+    (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         pc.type as InteractionReason
+  FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+  JOIN import_urine_adherence_us.PatientCalls pc ON p.uuid=pc.patientId
+  JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+  JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+  LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+  LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+  WHERE pc.direction='outgoing'
+    AND pc.answered=true
+    AND (pc.createdAt<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+    ),
+   
+PatientCallAttemptLog AS (
+   SELECT p.uuid AS PatientUUID,
+        date(ch.createdAt) as Cohort,
+         'Call Attempt' AS InteractionType,
+         'Call' AS InteractionParentType,
+         pc.createdAt AS InteractionTime,
+         prt.name AS Partner,
+        -- date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+         PatientsAlgoResults.FirstScanStatus,
+         PatientsAlgoResults.FirstScanTime,
+    (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         pc.type as InteractionReason
+  FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+  JOIN import_urine_adherence_us.PatientCalls pc ON p.uuid=pc.patientId
+  JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+  JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+  LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+  LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+  WHERE pc.direction='outgoing'
+    AND pc.answered=false
+    AND (pc.leftVm=false or pc.leftVm is null)
+    AND (pc.createdAt<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+    ),
+   
+PatientVoicemailsLeftLog AS (
+   SELECT p.uuid AS PatientUUID,
+        date(ch.createdAt) as Cohort,
+        'Voicemail' AS InteractionType,
+         'Call' AS InteractionParentType,
+       pc.createdAt AS InteractionTime,
+       prt.name AS Partner,
+      -- date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+       PatientsAlgoResults.FirstScanStatus,
+       PatientsAlgoResults.FirstScanTime,
+   (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         pc.type as InteractionReason
+   FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+   JOIN import_urine_adherence_us.PatientCalls pc ON p.uuid=pc.patientId
+   JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+   JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+  LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+   LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+   WHERE pc.direction='outgoing'
+       AND pc.answered=false
+       AND pc.leftVm = true
+       AND (pc.createdAt<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+  ),
+   
+PatientSmsLog AS (
+   SELECT p.uuid AS PatientUUID,
+         date(ch.createdAt) as Cohort,
+        'SMS' AS InteractionType,
+         'SMS' AS InteractionParentType,
+         ps.createdat AS InteractionTime,
+         prt.name AS Partner,
+       --  date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+         PatientsAlgoResults.FirstScanStatus,
+         PatientsAlgoResults.FirstScanTime,
+    (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         ps.type as InteractionReason
+   FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+   JOIN import_urine_adherence_us.PatientSmses ps ON p.uuid=ps.patientid
+   JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+   JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+   LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+   WHERE (ps.createdat<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+    AND ps.direction='outgoing'
+   ),
+   
+PatientEmailLog AS (
+   SELECT p.uuid AS PatientUUID,
+         date(ch.createdAt) as Cohort,
+        'Email' AS InteractionType,
+         'Email' AS InteractionParentType,
+         pe.createdat AS InteractionTime,
+         prt.name AS Partner,
+        -- date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+         PatientsAlgoResults.FirstScanStatus,
+         PatientsAlgoResults.FirstScanTime,
+    (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         pe.type as InteractionReason
+   FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+   JOIN import_urine_adherence_us.PatientEmails pe ON p.uuid=pe.patientid
+   JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+   JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+   LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+   WHERE (pe.createdat<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+  ),
+ 
+PatientKitSentLog AS (
+   SELECT p.uuid AS PatientUUID,
+          date(ch.createdAt) as Cohort,
+          'Kit Sent' AS InteractionType,
+          'Kit Sent' AS InteractionParentType,
+          min(fr.updatedAt) AS InteractionTime,
+         prt.name AS Partner,
+        -- date_part('year', AGE(ccp.dateOfBirth)) AS Age,
+         PatientsAlgoResults.FirstScanStatus,
+         PatientsAlgoResults.FirstScanTime,
+    (case when ch.flowType is not null then ch.flowType else ccp.onboardingFlow end) as OnboardingFlow,
+         ch.comments as CohortComments,
+         fr.packageType as InteractionReason
+   FROM `data-warehouse-324712.import_urine_commercial_us.Patients` p
+   JOIN `data-warehouse-324712.import_urine_commercial_us.FulfillmentRequests` fr ON p.id=fr.patientId
+   JOIN `data-warehouse-324712.import_urine_commercial_us.Partners` prt ON p.partnerId = prt.id
+   JOIN `data-warehouse-324712.import_urine_commercial_us.CallCenterPatients` ccp ON p.id=ccp.patientId
+   LEFT JOIN `data-warehouse-324712.import_urine_commercial_us.Cohorts`as ch on ccp.cohortId=ch.id
+   LEFT JOIN PatientsAlgoResults on p.id=PatientsAlgoResults.patientId
+   WHERE (fr.updatedAt<=PatientsAlgoResults.FirstScanTime OR PatientsAlgoResults.FirstScanTime is null)
+      and fr.provider = "gemco" and fr.status="accepted"
+   group by 1,2,3,4,6,7,8,9,10,11
+  ),
+
+AllInteractions as (
+   SELECT PatientAnsweredCallsLog.PatientUUID,
+          PatientAnsweredCallsLog.Cohort,
+          PatientAnsweredCallsLog.InteractionType,
+          PatientAnsweredCallsLog.InteractionParentType,
+          PatientAnsweredCallsLog.InteractionTime,
+          PatientAnsweredCallsLog.Partner,
+          --PatientAnsweredCallsLog.Age,
+          PatientAnsweredCallsLog.FirstScanStatus,
+          PatientAnsweredCallsLog.FirstScanTime,
+          PatientAnsweredCallsLog.InteractionReason,
+          PatientAnsweredCallsLog.OnboardingFlow,
+          PatientAnsweredCallsLog.CohortComments
+   FROM PatientAnsweredCallsLog
+   UNION ALL
+   SELECT PatientCallAttemptLog.PatientUUID,
+          PatientCallAttemptLog.Cohort,
+          PatientCallAttemptLog.InteractionType,
+          PatientCallAttemptLog.InteractionParentType,
+          PatientCallAttemptLog.InteractionTime,
+          PatientCallAttemptLog.Partner,
+         -- PatientCallAttemptLog.Age,
+          PatientCallAttemptLog.FirstScanStatus,
+          PatientCallAttemptLog.FirstScanTime,
+          PatientCallAttemptLog.InteractionReason,
+          PatientCallAttemptLog.OnboardingFlow,
+          PatientCallAttemptLog.CohortComments
+   FROM PatientCallAttemptLog
+   UNION ALL
+   SELECT PatientVoicemailsLeftLog.PatientUUID,
+          PatientVoicemailsLeftLog.Cohort,
+          PatientVoicemailsLeftLog.InteractionType,
+          PatientVoicemailsLeftLog.InteractionParentType,
+          PatientVoicemailsLeftLog.InteractionTime,
+          PatientVoicemailsLeftLog.Partner,
+        --  PatientVoicemailsLeftLog.Age,
+          PatientVoicemailsLeftLog.FirstScanStatus,
+          PatientVoicemailsLeftLog.FirstScanTime,
+          PatientVoicemailsLeftLog.InteractionReason,
+          PatientVoicemailsLeftLog.OnboardingFlow,
+          PatientVoicemailsLeftLog.CohortComments
+   FROM PatientVoicemailsLeftLog
+   UNION ALL
+   SELECT PatientSmsLog.PatientUUID,
+          PatientSmsLog.Cohort,
+          PatientSmsLog.InteractionType,
+          PatientSmsLog.InteractionParentType,
+          PatientSmsLog.InteractionTime,
+          PatientSmsLog.Partner,
+        --  PatientSmsLog.Age,
+          PatientSmsLog.FirstScanStatus,
+          PatientSmsLog.FirstScanTime,
+          PatientSmsLog.InteractionReason,
+          PatientSmsLog.OnboardingFlow,
+          PatientSmsLog.CohortComments
+   FROM PatientSmsLog
+   UNION ALL
+   SELECT PatientEmailLog.PatientUUID,
+          PatientEmailLog.Cohort,
+          PatientEmailLog.InteractionType,
+          PatientEmailLog.InteractionParentType,
+          PatientEmailLog.InteractionTime,
+          PatientEmailLog.Partner,
+        --  PatientEmailLog.Age,
+          PatientEmailLog.FirstScanStatus,
+          PatientEmailLog.FirstScanTime,
+          PatientEmailLog.InteractionReason,
+          PatientEmailLog.OnboardingFlow,
+          PatientEmailLog.CohortComments
+  FROM PatientEmailLog   
+  UNION ALL
+   SELECT PatientKitSentLog.PatientUUID,
+          PatientKitSentLog.Cohort,
+          PatientKitSentLog.InteractionType,
+          PatientKitSentLog.InteractionParentType,
+          PatientKitSentLog.InteractionTime,
+          PatientKitSentLog.Partner,
+        --  PatientKitSentLog.Age,
+          PatientKitSentLog.FirstScanStatus,
+          PatientKitSentLog.FirstScanTime,
+          PatientKitSentLog.InteractionReason,
+          PatientKitSentLog.OnboardingFlow,
+          PatientKitSentLog.CohortComments
+    FROM PatientKitSentLog
+   order by 3
+   )
+ 
+SELECT
+   ai.PatientUUID,
+   ai.Cohort,
+   ai.InteractionType,
+   ai.InteractionParentType,
+   ai.InteractionTime,
+   ai.Partner,
+ --  ai.Age,
+   ai.FirstScanStatus,
+   ai.FirstScanTime,
+   (CASE WHEN (ai.InteractionTime=ConvertingInteraction.LastInteractionTime and ai.FirstScanTime is not null) THEN true ELSE false END) as IsConvertingInteraction,
+   ai.InteractionReason,
+   ai.OnboardingFlow,
+   ai.CohortComments,
+   row_number() over(partition by ai.PatientUUID, ai.InteractionParentType order by ai.InteractionTime asc) as PatientInteractionOrder
+FROM AllInteractions as ai
+   join (
+       SELECT PatientUUID,
+           max(InteractionTime) as LastInteractionTime
+       FROM AllInteractions
+       GROUP BY 1) as ConvertingInteraction on ai.PatientUUID=ConvertingInteraction.PatientUUID
