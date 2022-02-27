@@ -1,0 +1,13 @@
+SELECT
+  id,
+  region,
+  uuid,
+  encoded_id,
+  is_test,
+  partner_id,
+  --mobile,
+  created_at,
+  updated_at,
+  clinician_id
+FROM
+  base_urine_commercial.patients

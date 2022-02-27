@@ -1,0 +1,10 @@
+SELECT
+  id,
+  region,
+  created_at,
+  updated_at,
+  name,
+  config,
+  status
+FROM
+  base_urine_commercial.partners

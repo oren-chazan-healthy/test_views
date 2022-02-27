@@ -1,0 +1,79 @@
+SELECT
+  scan_id,
+  CASE
+    WHEN error_type IS NULL AND status IS NOT NULL THEN CASE
+    WHEN product_name = 'acr'
+  AND JSON_VALUE(results,'$.ACR') IN ('abnormal', 'habnormal') THEN 1
+  --when  product_name = 'uti' and uti like 'simple%' then 1
+    WHEN product_name = 'velieve' AND LOWER(diagnosis) LIKE '%simple%' THEN 1
+  ELSE
+  0
+END
+  ELSE
+  0
+END
+  AS positive_results,
+  CASE
+    WHEN error_type IS NULL AND status IS NOT NULL THEN CASE
+    WHEN product_name = 'acr'AND JSON_VALUE(results,'$.ACR') NOT IN ('abnormal','habnormal') THEN 1
+  --when product_name = 'uti' and (uti not like 'simple_uti%' or uti is null) then 1
+    WHEN product_name = 'velieve' AND (LOWER(diagnosis) LIKE '%complicated%' or LOWER(diagnosis) LIKE '%unlikely%') THEN 1
+  ELSE
+  0
+END
+  ELSE
+  0
+END
+  AS negative_results,
+  CASE
+    WHEN error_type IS NULL THEN 0
+  ELSE
+  1
+END
+  AS errors
+  ,app_variant
+  ,JSON_VALUE(results,'$.ACR') as acr_result
+  ,LOWER(diagnosis) as velieve_result
+FROM (
+  SELECT
+    
+    CASE
+      WHEN o.product = 'uti' AND f.name IN ('velieve_online', 'boots_ireland') THEN 'velieve'
+    ELSE
+    o.product
+  END
+    AS product_name,
+    o.id AS scan_id,
+
+    --case when o.status in ('new', 'client_new_kit', 'client_dry_run', 'eligibility', 'has_results', 'has_diagnosis', 'after_pcp', 'client_pending_pcp') then 0 else 1 end as failed_scan,
+    ROW_NUMBER() OVER(PARTITION BY o.id ORDER BY CASE WHEN r.status IN ('has_results') THEN 1
+      ELSE
+      0
+    END
+      DESC,
+      e.client_created_at DESC) AS exam_priority,
+    r.results,
+    r.error_type,
+    v.diagnosis,
+    r.status,
+    e.app_variant
+  FROM
+    base_urine_commercial.orders o
+  LEFT OUTER JOIN
+    base_urine_commercial.exams e
+  ON
+    o.id = e.order_id
+  LEFT OUTER JOIN
+    base_urine_commercial.algo_results r
+  ON
+    e.id = r.exam_id
+  LEFT OUTER JOIN
+    base_urine_commercial.flows f
+  ON
+    o.flow_id = f.id
+  LEFT OUTER JOIN
+    base_urine_commercial.velieve_orders v
+  ON
+    o.id = v.order_id ) e
+WHERE
+  e.exam_priority = 1
